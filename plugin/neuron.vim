@@ -31,7 +31,7 @@ let g:neuron_tags_name = get(g:, 'neuron_tags_name', 'tags')
 let g:neuron_tags_style = get(g:, 'neuron_tags_style', 'multiline')
 let g:neuron_tmp_filename = get(g:, 'neuron_tmp_filename', '/tmp/neuronzettelsbuffer')
 
-nm <silent> <Plug>EditZettelNew :<C-U>call neuron#edit_zettel_new()<cr>
+nm <silent> <Plug>EditZettelNew :<C-U>call neuron#edit_zettel_new('')<cr>
 nm <silent> <Plug>EditZettelSearchContent :<C-U>call neuron#search_content(0)<cr>
 nm <silent> <Plug>EditZettelSearchContentUnderCursor :<C-U>call neuron#search_content(1)<cr>
 nm <silent> <Plug>EditZettelNewFromCword :<C-U>call neuron#edit_zettel_new_from_cword(1)<cr>
@@ -72,15 +72,5 @@ if !exists("g:neuron_no_mappings") || ! g:neuron_no_mappings
 	ino <expr> <c-x><c-u> neuron#insert_zettel_complete(0)
 	ino <expr> <c-x><c-y> neuron#insert_zettel_complete(1)
 end
-
-" refresh the cache now if we are in a zettelkasten dir
-if filereadable(g:neuron_dir."neuron.dhall")
-	let current_file = expand("%:p")
-	if empty(current_file)
-		call neuron#refresh_cache(0)
-	else
-		call neuron#refresh_cache(1)
-	endif
-endif
 
 " : vim: set fdm=marker :

@@ -44,7 +44,7 @@ endf
 func! neuron#insert_reducer_folgezettel(lines)
 	let l:results = []
 	for line in a:lines
-		let l:result = '[[[' . split(line, ":")[0] . ']]]'
+		let l:result = '[[' . split(line, ":")[0] . ']]#'
 		call add(l:results, l:result)
 	endfor
 	return join(l:results, ',')
@@ -180,15 +180,6 @@ func! neuron#insert_zettel_last(as_folgezettel)
 	call util#insert(l:zettelid, a:as_folgezettel, "a")
 endf
 
-func! neuron#edit_zettel_new()
-	if bufname('%') != ''
-		w
-	endif
-	let l:zettel_path = util#new_zettel_path('')
-	exec 'edit '.l:zettel_path
-	call util#add_empty_zettel_body('')
-endf
-
 func! neuron#edit_zettel_new_from_cword(as_folgezettel)
 	let l:vstart_prev = getpos("'<")
 	let l:vend_prev = getpos("'>")
@@ -253,7 +244,9 @@ func! neuron#edit_zettel_under_cursor()
 endf
 
 func! neuron#edit_zettel(zettel_id)
+	let g:_neuron_last_file = expand("%s")
 	exec 'edit '.g:neuron_dir.a:zettel_id.g:neuron_extension
+	call neuron#add_virtual_titles()
 endf
 
 func! neuron#refresh_cache(add_titles)
@@ -263,7 +256,7 @@ func! neuron#refresh_cache(add_titles)
 	endif
 
 	let g:_neuron_cache_add_titles = a:add_titles
-	let l:cmd = g:neuron_executable.' -d "'.g:neuron_dir.'" query --uri z:zettels'
+	let l:cmd = g:neuron_executable.' -d "'.g:neuron_dir.'" query --zettels'
 	if has('nvim')
 		call jobstart(l:cmd, {
 			\ 'on_stdout': function('s:refresh_cache_callback_nvim'),
@@ -274,7 +267,7 @@ func! neuron#refresh_cache(add_titles)
 			\ 'exit_cb': function('s:refresh_cache_callback_vim'),
 			\ 'out_io': 'file',
 			\ 'out_name': g:neuron_tmp_filename,
-			\ 'err_io': 'out'
+			\ 'err_io': 'null'
 		\ }
 		if has('patch-8.1.350')
 			let l:jobopt['noblock'] = 1
@@ -303,8 +296,7 @@ func! s:refresh_cache_callback(data)
 	if (g:neuron_debug_enable)
 		call writefile(split(a:data, "\n", 1), g:neuron_dir . 'query.json')
 	endif
-	let l:zettels = json_decode(a:data)["result"]
-
+	let l:zettels = json_decode(a:data)
 	call sort(l:zettels, function('util#zettel_date_sorter'))
 
 	let g:_neuron_zettels_titles_list = {}
@@ -313,33 +305,71 @@ func! s:refresh_cache_callback(data)
 	let g:_neuron_backlinks = {}
 
 	for z in l:zettels
-		let g:_neuron_zettels_titles_list[z['zettelID']] = z['zettelTitle']
-		call add(g:_neuron_zettels_by_id, { 'id': z['zettelID'], 'title': z['zettelTitle'], 'path': z['zettelPath'] })
-		call add(g:_neuron_zettels_search_list, z['zettelID'].":".substitute(z['zettelTitle'], ':', '-', ''))
-		let g:_neuron_backlinks[z['zettelID']] = []
+		let g:_neuron_zettels_titles_list[z['ID']] = z['Title']
+		call add(g:_neuron_zettels_by_id, { 'id': z['ID'], 'title': z['Title'], 'path': z['Path'] })
+		call add(g:_neuron_zettels_search_list, z['ID'].":".substitute(z['Title'], ':', '-', ''))
+		let g:_neuron_backlinks[z['ID']] = []
 	endfor
 
+	" Populate the backlink cache
 	for z in l:zettels
-		if !empty(z['zettelQueries'])
-			for l in z['zettelQueries']
-				if l[0][0] == 'ZettelQuery_ZettelById'
-					let l:key = l[0][1][0]
-					if has_key(g:_neuron_backlinks, l:key)
-						call add(g:_neuron_backlinks[l[0][1][0]], z['zettelID'])
-					endif
-				endif
-			endfor
-		endif
+		call s:refresh_backlink_cache_for_zettel(z['ID'])
 	endfor
-
-	if g:_neuron_cache_add_titles == 1
-		call neuron#add_virtual_titles()
-	endif
-	let g:_neuron_cache_add_titles = 1
 
 	if !empty(g:_neuron_queued_function)
 		call call(g:_neuron_queued_function[0], g:_neuron_queued_function[1])
 		let g:_neuron_queued_function = []
+	endif
+endf
+
+func! s:refresh_backlink_cache_for_zettel(id)
+	let l:cmd = g:neuron_executable.' -d "'.g:neuron_dir.'" query --backlinks-of "'.a:id.'"'
+	if has('nvim')
+		call jobstart(l:cmd, {
+			\ 'on_stdout': function('s:refresh_backlink_callback_nvim'),
+			\ 'stdout_buffered': 1
+		\ })
+	elseif has('job')
+		let l:jobopt = {
+			\ 'out_cb': function('s:refresh_backlink_callback_vim'),
+			\ 'err_io': 'null',
+		\ }
+		if has('patch-8.1.350')
+			let l:jobopt['noblock'] = 1
+		endif
+		call job_start(l:cmd, l:jobopt)
+	else
+		let l:cmd[2] = shellescape(g:neuron_dir)
+		let l:data = json_decode(system(join(cmd)))
+		call s:refresh_cache_callback(l:data)
+	endif
+
+endf
+
+func s:refresh_backlink_callback_nvim(id, data, event)
+	let l:decoded = json_decode(join(a:data))
+	call s:refresh_backlink_callback(l:decoded)
+endf
+
+func! s:refresh_backlink_callback_vim(channel, data)
+	call s:refresh_backlink_callback(json_decode(a:data))
+endf
+
+func! s:refresh_backlink_callback(data)
+	let l:links = a:data['result']
+	let l:id = a:data['query'][1][1]
+	for link in l:links
+		if has_key(g:_neuron_backlinks, link[1]['ID'])
+			call add(g:_neuron_backlinks[l:id], link[1]['ID'])
+		endif
+	endfor
+	" Update the virtual titles (x backlinks) if we just processed the current
+	" zettel
+	if l:id == util#current_zettel()
+		if g:_neuron_cache_add_titles == 1
+			call neuron#add_virtual_titles()
+		endif
+		let g:_neuron_cache_add_titles = 1
 	endif
 endf
 
@@ -354,7 +384,6 @@ let g:_neuron_history_prevent_overwrite = 0
 
 " used when we first open vim
 let g:_neuron_did_init = 0
-
 func! neuron#on_enter()
 	let g:_neuron_last_file = g:_neuron_current_file
 	let g:_neuron_current_file = expand("%s")
@@ -364,8 +393,6 @@ func! neuron#on_enter()
 		call add(g:_neuron_history, expand("%s"))
 		let g:_neuron_history_pos = g:_neuron_history_pos + 1
 	endif
-
-	call neuron#update_backlinks(0)
 
 	if g:_neuron_did_init
 		return
@@ -639,24 +666,19 @@ endfunc
 " Add tags from a selection list
 func! neuron#tags_add_select()
 	" TODO: use cache
-	let l:cmd = g:neuron_executable.' -d "'.g:neuron_dir.'" query -u z:tags 2>/dev/null'
+	" TODO: get rid of stderr redirect, use job_start instead
+	let l:cmd = g:neuron_executable.' -d "'.g:neuron_dir.'" query --tags 2>/dev/null'
 	let l:data = system(l:cmd)
-	let l:tags = json_decode(l:data)["result"]
+	let l:tags = json_decode(l:data)
 	if empty(l:tags)
 		echom 'No existing tags found.'
 
 		return
 	endif
 
-	let l:existing_tags_search = []
-	for t in l:tags
-		let l:child_tags = neuron#tags_add_children('', t['name'], t['children'])
-		call extend(l:existing_tags_search, l:child_tags)
-	endfor
-
 	call fzf#run(fzf#wrap({
 		\ 'options': util#get_fzf_options('Insert tag: ', 0, []),
-		\ 'source': l:existing_tags_search,
+		\ 'source': l:tags,
 		\ 'sink': function('neuron#tags_add_new'),
 	\ }, g:neuron_fullscreen_search))
 endfunc
@@ -666,9 +688,10 @@ func! neuron#tags_search()
 	let l:tag = input('Search by tag: ')
 
 	"TODO: use cache
-	let l:cmd = g:neuron_executable.' -d "'.g:neuron_dir.'" query -t '.l:tag
+	"TODO: remove stderr redirect
+	let l:cmd = g:neuron_executable.' -d "'.g:neuron_dir.'" query --tag="'.l:tag.'" 2>/dev/null'
 	let l:data = system(l:cmd)
-	let l:zettels = json_decode(data)["result"]
+	let l:zettels = json_decode(data)
 	if empty(l:zettels)
 		echom 'No results.'
 		return
@@ -676,7 +699,7 @@ func! neuron#tags_search()
 
 	let l:zettel_tag_search = []
 	for z in l:zettels
-		call add(l:zettel_tag_search, z['zettelID'].":".substitute(z['zettelTitle'], ':', '-', ''))
+		call add(l:zettel_tag_search, z['ID'].":".substitute(z['Title'], ':', '-', ''))
 	endfor
 
 	call fzf#run(fzf#wrap({
