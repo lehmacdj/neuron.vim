@@ -2,13 +2,17 @@
 Manage your [Zettelkasten](https://neuron.zettel.page/2011401.html) with the
 help of [neuron](https://github.com/srid/neuron) in {n}vim.
 
-(This is an actively maintaned fork of [`ihsanturk/neuron.vim`](https://github.com/ihsanturk/neuron.vim) that works with newer versions of `neuron` and changes basically everything, with extra features, commands and different options.)
+This is a fork that I made to work with a slightly modified version of neuron
+that I used. I'm not planning on actively maintaining it other than my needs,
+and don't recommend that anyone else use it.
 
 ![usage-photo](screenshot.png)
 
 ## Requirements
 
 - [neuron](https://github.com/srid/neuron)
+  - patched version 1.9.3
+  - available here if you really REALLY want to use this: https://github.com/lehmacdj/neuron
 - [fzf](https://github.com/junegunn/fzf.vim)
 - [ag](https://github.com/mizuno-as/silversearcher-ag) if you intend to use the content search command.
 
